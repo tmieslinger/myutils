@@ -37,11 +37,8 @@ def get_uvspec_input_from_aster(filename):
     return ret
 
 
-def uvspec_input(file):
-    setup = get_uvspec_input_from_aster(file)
-    
-    # calculate wind speed distribution. Scale values (std) acc. to Barbados data
-    u_avg, v_avg = get_era5uv_2aster(file)
+def uv_distribution(u_avg, v_avg, size):
+    '''calculate wind speed distribution. Scale values (std) acc. to Barbados data.'''
     if u_avg > 0:
         u_std = .3
     else:
@@ -53,21 +50,25 @@ def uvspec_input(file):
         v_std = -.21 * v_avg + .3
     #u_std = .3
     #v_std = .3
-    print('uavg: '+str(np.round(u_avg,2)) + ', uvar: '+str(np.round(u_std,2)))
-    print('vavg: '+str(np.round(v_avg,2)) + ', vvar: '+str(np.round(v_std,2)))
-
-    u = np.random.normal(loc=u_avg, scale=u_std, size=len(setup['umus']))
-    v = np.random.normal(loc=v_avg, scale=v_std, size=len(setup['umus']))
+    u = np.random.normal(loc=u_avg, scale=u_std, size=size)
+    v = np.random.normal(loc=v_avg, scale=v_std, size=size)
     
-    setup['u'] = u
-    setup['v'] = v
-    setup['ws'] = np.sqrt(u**2 + v**2)
+    return (u, v)
+    
+    
+def uvspec_input(file):
+    setup = get_uvspec_input_from_aster(file)
+    
+    u_avg, v_avg = get_era5uv_2aster(file)
+    setup['u'], setup['v'] = uv_distribution(u_avg, v_avg, size=np.shape(setup['umus']))
+    setup['ws'] = np.sqrt(setup['u']**2 + setup['v']**2)
     #abs(np.random.normal(loc=np.sqrt(u_avg**2 + v_avg**2), scale=1.75, size=len(setup['umus'])))
+    
     setup['aod'] = np.array([get_modisAODavg_2aster(file)])
     if np.isnan(setup['aod']):
         setup['aod'] = np.array([.05]) # low default value over ocean
     #setup['aod'] = np.array([.05])
-    print('AOD: '+str(np.round(setup['aod'],2)))
+    print('AOD: '+str(np.round(setup['aod'], 2)))
     
     return setup
 
@@ -227,7 +228,12 @@ def modis_dt(dt):
 
 
 def modis_filename(path, dt):
-    return glob.glob(path + 'MOD04_3K.A' + modis_dt(dt).strftime('%Y%j') + '.' + modis_dt(dt).strftime('%H%M') + '*')[0]
+    '''get MODIS file corresponding to a given datetime.'''
+    filelist = glob.glob(f'{path}/MOD04_3K.A{modis_dt(dt):%Y%j}.{modis_dt(dt):%H%M}*')
+    if filelist:
+        return filelist[0]
+    else:
+        raise FileNotFoundError
 
 
 def read_modis_var(path, dt, var):
@@ -271,9 +277,9 @@ def extent(LL, LR, UL, UR):
 
 def get_aodvalue(aod, lons, lats, latmin, latmax, lonmin, lonmax):
     for i in range(10):
-        mask = np.logical_and(lons>lonmin,
-                          np.logical_and(lons<lonmax,
-                                         np.logical_and(lats>latmin, lats<latmax)))
+        mask = np.logical_and(lons>=lonmin,
+                          np.logical_and(lons<=lonmax,
+                                         np.logical_and(lats>=latmin, lats<=latmax)))
         # check how many pixels are no nans
         if np.sum(~np.isnan(aod[mask])) > 10:
             # pass and continue
