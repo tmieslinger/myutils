@@ -3,7 +3,13 @@
 import numpy as np
 import netCDF4
 
+import cartopy.crs as ccrs
+import matplotlib.pyplot as plt
 from PIL import Image
+from skimage import measure
+from collections import OrderedDict
+
+import typhon as ty
 from typhon.cloudmask import aster, cloudstatistics
 
 
@@ -17,11 +23,92 @@ def asterID(filename):
     return str(x[7:11])+str(x[3:7])+'_'+str(x[11:19])
 
 
-def strrnd(x):
-    '''round float to 3 digits and return its string beginning 
-    with an underscore.
+def sort_aster_filelist(filelist):
+    '''Sort ASTER files from a list ouput of glob according to their timestamp.'''
+    idx = []
+    for file in filelist:
+        x = file.split('/')[-1].split('_')[2]
+        idx.append(int(str(x[7:11])+str(x[3:7])+str(x[11:19])))
+    
+    return [filelist[i] for i in np.argsort(idx)]
+
+
+def dt_unique(astfiles):
+    '''return list of days (format:YYYYMMDD) of a given list of ASTER images.'''
+    return list(OrderedDict.fromkeys([asterID(file)[:8] for file in astfiles]))
+
+
+def check_VNIRmodeON(file):
+    ai = aster.ASTERimage(file)
+    meta = ai.get_metadata()
+    return meta['ASTEROBSERVATIONMODE.1']=='VNIR1, ON'
+
+def check_VNIRBmodeON(file):
+    ai = aster.ASTERimage(file)
+    meta = ai.get_metadata()
+    return meta['ASTEROBSERVATIONMODE.2']=='VNIR2, ON'
+
+def check_SWIRmodeON(file):
+    ai = aster.ASTERimage(file)
+    meta = ai.get_metadata()
+    return meta['ASTEROBSERVATIONMODE.3']=='SWIR, ON'
+    
+def check_TIRmodeON(file):
+    ai = aster.ASTERimage(file)
+    meta = ai.get_metadata()
+    return meta['ASTEROBSERVATIONMODE.4']=='TIR, ON'
+
+def check_instrumentmodes(file):
+    ai = aster.ASTERimage(file)
+    meta = ai.get_metadata()
+    vnir1 = meta['ASTEROBSERVATIONMODE.1']=='VNIR1, ON'
+    vnir2 = meta['ASTEROBSERVATIONMODE.2']=='VNIR2, ON'
+    swir = meta['ASTEROBSERVATIONMODE.3']=='SWIR, ON'
+    tir = meta['ASTEROBSERVATIONMODE.4']=='TIR, ON'
+    
+    return (vnir1, vnir2, swir, tir)
+
+
+def check_cloudfraction(file, threshold=.8):
+    '''Check the cloud fraction in an ASTER image to be smaller than a given
+    threshold value, default: 80 %.'''
+    ai = aster.ASTERimage(file)
+    clmask = ai.retrieve_cloudmask(output_binary=True, include_channel_r5=False)
+    
+    return cloudstatistics.cloudfraction(clmask) < threshold
+
+
+def filter_cloudmask(cloudmask, threshold=0, connectivity=1):
+    '''Filter a given cloudmask for small cloud objects defined by their pixel
+    number. 
+    
+    Parameters:
+        cloudmask (ndarray): 2d binary cloud mask (optional with NaNs).
+        threshold (int): minimum pixel number of objects remaining in cloudmask.
+        connectivity (int):  Maximum number of orthogonal hops to consider
+            a pixel/voxel as a neighbor (see :func:`skimage.measure.label`).
+    
+    Return:
+        ndarray: filtered cloudmask without NaNs.
     '''
-    return '_' + str('{:.3f}'.format(round(x, 3)))
+    cloudmask[np.isnan(cloudmask)] = 0
+    labels = measure.label(cloudmask, connectivity=connectivity)
+    props = measure.regionprops(labels)
+    area = [prop.area for prop in props]
+    
+    # Find objects < threshold pixle number, get their labels, set them to 0-clear.
+    smallclouds = [t[0] for t in filter(lambda a: a[1] < threshold,
+                                        enumerate(area, 1))]
+    for label in smallclouds:
+        cloudmask[labels==label] = 0
+    
+    return cloudmask
+
+
+def strrnd(x):
+    '''round float to 3 digits and return its string.
+    '''
+    return f'{float(x):.3f}'
 
 
 def strcornercoords(coordobj):
@@ -37,6 +124,63 @@ def strcornercoords(coordobj):
         + strrnd(coordobj.UPPERLEFT[i]))
         
     return out
+
+
+def aster_mercator_bounds(file):
+    ai = aster.ASTERimage(file)
+    meta = ai.get_metadata()
+    
+    out = ''
+    for i in [float(meta['WESTBOUNDINGCOORDINATE']), float(meta['EASTBOUNDINGCOORDINATE'])]:
+        if i < 0:
+            out += strrnd(abs(i)) + 'W-'
+        else:
+            out += strrnd(i) + 'E-'
+    
+    for i in [float(meta['SOUTHBOUNDINGCOORDINATE']), float(meta['NORTHBOUNDINGCOORDINATE'])]:
+        if i < 0:
+            out += strrnd(abs(i)) + 'S-'
+        else:
+            out += strrnd(i) + 'N-'
+    
+    return out[:-1]
+
+
+def aster_raw2mercator(file, path2ofile, nth=1):
+
+    ai = aster.ASTERimage(file)
+    refl = ai.get_reflectance('3N')
+    lats, lons = ai.get_latlon_grid(channel='3N')
+    meta = ai.get_metadata()
+    extent = [float(meta['WESTBOUNDINGCOORDINATE']),
+              float(meta['EASTBOUNDINGCOORDINATE']),
+              float(meta['SOUTHBOUNDINGCOORDINATE']),
+              float(meta['NORTHBOUNDINGCOORDINATE'])]
+    
+    projection = ccrs.Mercator()
+    data_crs = ccrs.PlateCarree()
+
+    fig, ax = plt.subplots(figsize=(49.8/nth, 42/nth),
+                           subplot_kw=dict(projection=projection))
+    ax.set_extent(extent, crs=data_crs)
+    features = ty.plots.get_cfeatures_at_scale(scale='50m')
+    ax.add_feature(features.BORDERS)
+    ax.add_feature(features.COASTLINE)
+
+    s = (slice(0, -1, nth), slice(0, -1, nth))
+    ax.pcolormesh(lons[s], lats[s], refl[s], transform=data_crs, cmap='Greys_r')
+
+    ax.axis("off")
+    ax.background_patch.set_visible(False)
+    ax.outline_patch.set_visible(False)
+    ax.set_position([0, 0, 1, 1])
+    ofile = (path2ofile + 'TERRA_ASTER_' + asterID(file)[:-2] + '_'
+                + aster_mercator_bounds(file)
+                + '_res'+str(15*nth)+'m.png')
+    fig.savefig(ofile, transparent=True, dpi=100)#, bbox_inches='standard')
+    plt.close()
+    
+    return ofile
 
 
 def aster_raw2png(file, path2ofile):
@@ -90,6 +234,9 @@ def aster_raw2nc(file, path2ofile):
     bt11 = ai.get_brightnesstemperature('14')
     cthIR = ai.get_cloudtopheight()
     # 1d cloud field statistics
+    cmfiltered = cloudstatistics.filter_cloudmask(cloudmask,
+                                                  threshold=4,
+                                                  connectivity=2)
     cf = cloudstatistics.cloudfraction(cloudmask)
     iorg = cloudstatistics.iorg(cloudmask, connectivity=2)
     scai = cloudstatistics.scai(cloudmask, connectivity=2)
@@ -221,30 +368,6 @@ def aster_raw2nc(file, path2ofile):
     scenecenter.description = ''
     scenecenter.unit = 'degree'
     scenecenter[:] = ai.scenecenter
-
-    scenecornerLL = info.createVariable('SceneCornerLL', np.float32, ('latlon'))
-    scenecornerLL.long_name = 'Lower left corner (latitude, longitude)'
-    scenecornerLL.description = ''
-    scenecornerLL.unit = 'degree'
-    scenecornerLL[:] = ai.cornercoordinates.LOWERLEFT
-
-    scenecornerLR = info.createVariable('SceneCornerLR', np.float32, ('latlon'))
-    scenecornerLR.long_name = 'Lower right corner (latitude, longitude)'
-    scenecornerLR.description = ''
-    scenecornerLR.unit = 'degree'
-    scenecornerLR[:] = ai.cornercoordinates.LOWERRIGHT
-
-    scenecornerUR = info.createVariable('SceneCornerUR', np.float32, ('latlon'))
-    scenecornerUR.long_name = 'Upper right corner (latitude, longitude)'
-    scenecornerUR.description = ''
-    scenecornerUR.unit = 'degree'
-    scenecornerUR[:] = ai.cornercoordinates.UPPERRIGHT
-
-    scenecornerUL = info.createVariable('SceneCornerUL', np.float32, ('latlon'))
-    scenecornerUL.long_name = 'Upper left corner (latitude, longitude)'
-    scenecornerUL.description = ''
-    scenecornerUL.unit = 'degree'
-    scenecornerUL[:] = ai.cornercoordinates.UPPERLEFT
     
     ncfile.close()
     
