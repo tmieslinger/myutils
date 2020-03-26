@@ -68,6 +68,15 @@ def uv_distribution(u_avg, v_avg, size):
     v = np.random.normal(loc=v_avg, scale=v_std, size=size)
     
     return (u, v)
+
+
+def u_std(u_avg):
+    '''Standard deviation in u wind component according to BCO wind data.'''
+    return .14 * abs(u_avg) + .3 # .13 ... .16
+
+def v_std(v_avg):
+    '''Standard deviation in u wind component according to BCO wind data.'''
+    return  .21 * abs(v_avg) + .3
     
 
 def sfc_slope_variance(u, v=None):
