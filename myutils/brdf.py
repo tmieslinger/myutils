@@ -45,7 +45,7 @@ def wswdir2uv(ws, wdir):
 
 def uv2wswdir(u, v):
     wdir = np.rad2deg(np.arctan2(v, u))
-    wdir[wdir < 0] += 360
+    np.asarray(wdir)[wdir < 0] += 360
     
     return (np.sqrt(u**2 + v**2), wdir)
 
