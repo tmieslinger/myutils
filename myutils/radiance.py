@@ -21,6 +21,7 @@ The main literature for equations and calculation approaches:
 [1] Lin, Z., Li, W., Gatebe, C., Poudyal, R., and Stamnes, K. (2016). Radiative transfer simulations of the two-dimensional ocean glint reflectance and determination of the sea surface roughness, Appl. Opt. 55, 1206-1215.
 [2] Stamnes, K., Thomas, G., & Stamnes, J. (2017). Radiative Transfer in the Atmosphere and Ocean. Cambridge: Cambridge University Press. doi:10.1017/9781316148549.
 [3] Koelling, T., 2015. Characterization, calibration and operation of a hyperspectral sky imager. Master’s thesis.
+[4] Huaguo Zhang, Kang Yang, Xiulin Lou, Yan Li, Gang Zheng, Juan Wang, Xiaozhen Wang, Lin Ren, Dongling Li, Aiqin Shi, Observation of sea surface roughness at a pixel scale using multi-angle sun glitter images acquired by the ASTER sensor, Remote Sensing of Environment, Volume 208, 2018, Pages 97-108, ISSN 0034-4257, https://doi.org/10.1016/j.rse.2018.02.004.
 '''
 
 def theta_phi2vector(theta, phi):
@@ -91,12 +92,12 @@ def phi(unit_vector):
     Returns:
         ndarray: phi angle in rad.
     '''
-    return np.arctan2(unit_vector[1], unit_vector[0])
+    return np.arctan2(unit_vector[0], unit_vector[1])
 
 
 def sfc_slope_variance(ws):
     '''Surface slope variance.
-    The mean square slope components, crosswind and up/downwind following Cox
+    Wind-generated sea surface roughness, crosswind and up/downwind following Cox
     and Munk, 1954.
     
     Parameters:
@@ -137,7 +138,8 @@ def mu_sca(sun, view):
 
 def wavefacet_normal(sun, view):
     '''Ocean wave facet normal.
-        
+    Assumed average specular reflection.
+    
     Parameters:
         sun (ndarray): unity vector into sun. First 3 dimensions are (x, y, z),
             further dimensions for 1d, or 2d field calculations.
@@ -147,7 +149,6 @@ def wavefacet_normal(sun, view):
     Returns:
         float: wave facet normal.
     '''
-    #(mu(sun) + mu(view)) / np.sqrt(2 * (1 - mu_sca(sun, view)))
     n = sun + view
     # l2 norm, i.e. abs,  along axis 0
     n /= np.linalg.norm(n, axis=0)
@@ -467,3 +468,61 @@ def reflectance_atm(sun, view, tau, omega0=.9):
         (ndarray): diffuse atmospheric reflectance.
     '''
     return np.pi / mu(sun) * transmittance_atm(sun, view, tau, omega0)
+
+
+class Wind():
+    def __init__(self, u, v, w=0):
+        u, v, w = np.broadcast_arrays(u, v, w)
+        self.vector = np.stack((u, v, w), axis=0)
+    
+    @property
+    def u(self):
+        return self.vector[0]
+
+    @property
+    def v(self):
+        return self.vector[1]
+    
+    @property
+    def w(self):
+        return self.vector[2]
+    
+    @classmethod
+    def from_wswdir(cls, ws, wdir):
+        u = -ws * np.sin(np.deg2rad(wdir))
+        v = -ws * np.cos(np.deg2rad(wdir))
+        return cls(u, v)
+        
+    def get_speed(self):
+        return np.linalg.norm(self.vector, axis=0)
+    
+    def get_direction(self):
+        return np.rad2deg(np.arctan2(-self.u, -self.v)) % 360
+    
+
+def ws_gauss2_distribution(ws, u_sigma, wdir, out_shape):
+    '''Rayleigh wind speed distribution.
+    Wind speed distribution as a combination of Gaussian distributions of wind
+    speed components u and v.
+    
+    Parameters:
+        ws (float): average wind speed.
+        u_sigma (float): standard deviation of wind component u.
+        wdir (float): wind direction (matching `ws`).
+        size (tuple): output array shape.
+    
+    Returns:
+        ndarray: rayleigh wind speed distribution.
+    '''
+    w = Wind.from_wswdir(ws, wdir)
+    np.random.seed(42)
+    v_gauss = np.random.normal(loc=w.v, scale=.3, size=out_shape) # constant
+    u_gauss = np.random.normal(loc=w.u, scale=u_sigma, size=out_shape)
+    
+    return np.linalg.norm((u_gauss, v_gauss), axis=0)
+
+
+def u_stddev(u_avg):
+    '''Standard deviation of wind component u from BCO measurements.
+    '''
+    return abs(u_avg) * .13 + .3
