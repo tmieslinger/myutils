@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 # coding: utf-8
+import datetime
+
 import numpy as np
 import netCDF4
-
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -22,6 +23,13 @@ def asterID(filename):
     
     return str(x[7:11])+str(x[3:7])+'_'+str(x[11:19])
 
+def dt_from_file(file):
+    """extract datetime from ASTER file name."""
+    x = file.split('/')[-1].split('_')[2]
+    dt = str(x[7:11])+str(x[3:7])+str(x[11:19])
+    
+    return datetime.datetime.strptime(dt, "%Y%m%d%H%M%S")
+
 
 def sort_aster_filelist(filelist):
     '''Sort ASTER files from a list ouput of glob according to their timestamp.'''
@@ -31,6 +39,33 @@ def sort_aster_filelist(filelist):
         idx.append(int(str(x[7:11])+str(x[3:7])+str(x[11:19])))
     
     return [filelist[i] for i in np.argsort(idx)]
+
+
+def is_eurec4a(ai):
+    # check instruments are turned on
+    if np.all(myutils.aster.check_instrumentmodes(ai)):
+        # check EUREC4A time
+        if (datetime.datetime(2020, 1, 1) < ai.datetime
+            < datetime.datetime(2020, 3, 1)):
+            # check EUREC4A region
+            if (6 < ai.scenecenter.latitude < 17 and
+                -65 < ai.scenecenter.longitude < -40):
+                ret = True
+            else:
+                ret = False
+                print(f"ASTER image location with {ai.scenecenter} lies outside"
+                      f" of the EUREC4A domain (latitude:7 to 17 degree N, "
+                      f"longitude: -60 to -40 degree E)")
+        else:
+            ret = False
+            print(f"ASTER image date {ai.datetime} does not fall into the "
+                  f"EUREC4A time from 2020-01-01 to 2020-02-28.")
+    else:
+        ret = False
+        print(f"ASTER instrument modes: {myutils.aster.check_instrumentmodes(ai)}")
+    
+    return ret
+
 
 
 def dt_unique(astfiles):
@@ -58,8 +93,8 @@ def check_TIRmodeON(file):
     meta = ai.get_metadata()
     return meta['ASTEROBSERVATIONMODE.4']=='TIR, ON'
 
-def check_instrumentmodes(file):
-    ai = aster.ASTERimage(file)
+def check_instrumentmodes(ai):
+    #ai = aster.ASTERimage(file)
     meta = ai.get_metadata()
     vnir1 = meta['ASTEROBSERVATIONMODE.1']=='VNIR1, ON'
     vnir2 = meta['ASTEROBSERVATIONMODE.2']=='VNIR2, ON'
@@ -76,33 +111,6 @@ def check_cloudfraction(file, threshold=.8):
     clmask = ai.retrieve_cloudmask(output_binary=True, include_channel_r5=False)
     
     return cloudstatistics.cloudfraction(clmask) < threshold
-
-
-def filter_cloudmask(cloudmask, threshold=0, connectivity=1):
-    '''Filter a given cloudmask for small cloud objects defined by their pixel
-    number. 
-    
-    Parameters:
-        cloudmask (ndarray): 2d binary cloud mask (optional with NaNs).
-        threshold (int): minimum pixel number of objects remaining in cloudmask.
-        connectivity (int):  Maximum number of orthogonal hops to consider
-            a pixel/voxel as a neighbor (see :func:`skimage.measure.label`).
-    
-    Return:
-        ndarray: filtered cloudmask without NaNs.
-    '''
-    cloudmask[np.isnan(cloudmask)] = 0
-    labels = measure.label(cloudmask, connectivity=connectivity)
-    props = measure.regionprops(labels)
-    area = [prop.area for prop in props]
-    
-    # Find objects < threshold pixle number, get their labels, set them to 0-clear.
-    smallclouds = [t[0] for t in filter(lambda a: a[1] < threshold,
-                                        enumerate(area, 1))]
-    for label in smallclouds:
-        cloudmask[labels==label] = 0
-    
-    return cloudmask
 
 
 def strrnd(x):
@@ -230,19 +238,19 @@ def aster_raw2nc(file, path2ofile):
     latitudesVNIR, longitudesVNIR = ai.get_latlon_grid('3N')
     latitudesTIR, longitudesTIR = ai.get_latlon_grid('14')
     cloudmask = ai.retrieve_cloudmask(include_channel_r5=False)
-    reflection082 = ai.get_reflectance('3N')
-    bt11 = ai.get_brightnesstemperature('14')
+    reflection082 = ai.get_radiance('3N')
+    bt11 = ai.get_radiance('14')
     cthIR = ai.get_cloudtopheight()
     # 1d cloud field statistics
-    cmfiltered = cloudstatistics.filter_cloudmask(cloudmask,
-                                                  threshold=4,
-                                                  connectivity=2)
+    #cmfiltered = cloudstatistics.filter_cloudmask(cloudmask,
+    #                                              threshold=4,
+    #                                              connectivity=2)
     cf = cloudstatistics.cloudfraction(cloudmask)
-    iorg = cloudstatistics.iorg(cloudmask, connectivity=2)
-    scai = cloudstatistics.scai(cloudmask, connectivity=2)
+    #iorg = cloudstatistics.iorg(cloudmask, connectivity=2)
+    #scai = cloudstatistics.scai(cloudmask, connectivity=2)
     
     # create output netcdf file
-    ncfile = netCDF4.Dataset(path2ofile + '/TERRA_ASTER_' + asterID(file) + '.nc',
+    ncfile = netCDF4.Dataset(path2ofile + 'TERRA_ASTER_' + asterID(file) + '.nc',
                              mode='w', format='NETCDF4')
     # global attributes
     ncfile.title='ASTER data processed for EUREC4A quicklooks.'
@@ -292,21 +300,23 @@ def aster_raw2nc(file, path2ofile):
     nlonTIR.description = 'longitudes of each pixel for thermal TIR radiometer data'
     nlonTIR[:] = longitudesTIR
     
-    nrefl = ncfile.createVariable('reflection082', np.float32, 
-                                ('pixel_alongtrack_VNIR',
-                                 'pixel_acrosstrack_VNIR'))
-    nrefl.units = 'unitless'
-    nrefl.long_name = 'Relfection at 0.82 micron'
-    nrefl.description = 'reflection derived from channel 3N at 0.82 micron'
-    nrefl[:] = reflection082
-
-    nbt = ncfile.createVariable('brightness_temperature11', np.float32, 
-                                ('pixel_alongtrack_TIR',
-                                 'pixel_acrosstrack_TIR'))
-    nbt.units = 'Kelvin'
-    nbt.long_name = 'Brightness temperature at 11 micron'
-    nbt.description = 'brightness temperature derived from channel 14 at 11 micron'
-    nbt[:] = bt11
+    for i in range(3):
+        nrefl = ncfile.createVariable(f"reflection082_{i}", np.float32, 
+                                    ('pixel_alongtrack_VNIR',
+                                     'pixel_acrosstrack_VNIR'))
+        nrefl.units = 'unitless'
+        nrefl.long_name = 'Relfection at 0.82 micron'
+        nrefl.description = 'reflection derived from channel 3N at 0.82 micron'
+        nrefl[:] = reflection082
+    
+    for i in range(5):
+        nbt = ncfile.createVariable(f"brightness_temperature11_{i}", np.float32, 
+                                    ('pixel_alongtrack_TIR',
+                                     'pixel_acrosstrack_TIR'))
+        nbt.units = 'Kelvin'
+        nbt.long_name = 'Brightness temperature at 11 micron'
+        nbt.description = 'brightness temperature derived from channel 14 at 11 micron'
+        nbt[:] = bt11
 
     nclmask = ncfile.createVariable('cloudmask', np.float32, 
                                 ('pixel_alongtrack_VNIR',
@@ -338,14 +348,14 @@ def aster_raw2nc(file, path2ofile):
     niorg.long_name = 'Cluster index Iorg'
     niorg.description = ('cloud cluster index I_org following Tompkins and Semie,'
                        +'2017')
-    niorg[:] = iorg
+    #niorg[:] = iorg
 
     nscai = stats.createVariable('scai', np.float32)
     nscai.units = 'unitless'
     nscai.long_name = 'Simple convective aggregation index'
     nscai.description = ('cloud cluster index Simple Convective Aggregation Index'
                        +'(SCAI) following Tobin, Bony, and Roca, 2012')
-    nscai[:] = scai
+    #nscai[:] = scai
     
     # create group for general ASTER image info (sensor-sun geometry)
     info = ncfile.createGroup('imageinfo')
