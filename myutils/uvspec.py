@@ -10,6 +10,7 @@ import numpy as np
 import xarray as xr
 import netCDF4
 import cdsapi
+from scipy.interpolate import griddata
 
 import typhon as ty
 from typhon.cloudmask import aster
@@ -110,6 +111,43 @@ def get_era5uv_2aster(file):
     
     return (np.mean(u), np.mean(v))
 
+def get_era5uv_2aster_grid(file):
+    '''Check for file existance and download ERA5 if necessary, read wind speed data,
+    interpolate with nearest neighbor to ASTER image dimension.
+        
+    Parameters:
+        file (str): ASTER granule filename including path.
+        
+    Returns:
+        float: average wind speed [ms-1]
+    '''
+    ai = aster.ASTERimage(file)
+    lats_ast, lons_ast = ai.get_latlon_grid()
+    LL, LR, UL, UR = get_aster_cornercoordinates(file)
+    
+    era5path = '/scratch/uni/u237/user_data/tmieslinger/era5/'
+    erafile = get_era5_file(path=era5path, dt=ai.datetime)
+
+    lon = read_era5_variable(erafile, 'longitude')
+    lat = read_era5_variable(erafile, 'latitude')
+    lons, lats = np.meshgrid(lon, lat)
+    
+    # the mask includes the ASTER domain extendet by 1 degree to all sides
+    mask = np.logical_and(lons > LL[1] - 1,
+                          np.logical_and(lons < UR[1] + 1,
+                                         np.logical_and(lats > LR[0] - 1,
+                                                        lats < UL[0] + 1)))
+        
+    u_era = read_era5_variable(erafile, 'u10')[mask]
+    v_era = read_era5_variable(erafile, 'v10')[mask]
+    lons_era = lons[mask]
+    lats_era = lats[mask]
+    
+    # interpolate era5 data to ASTER grid
+    u = griddata((lats_era, lons_era), u_era, (lats_ast, lons_ast), method='linear')
+    v = griddata((lats_era, lons_era), v_era, (lats_ast, lons_ast), method='linear')
+    
+    return u, v
 
 def get_aster_cornercoordinates(file):
     
