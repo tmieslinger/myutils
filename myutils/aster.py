@@ -30,6 +30,9 @@ def dt_from_file(file):
     
     return datetime.datetime.strptime(dt, "%Y%m%d%H%M%S")
 
+def dt_unique(astfiles):
+    '''return list of days (format:YYYYMMDD) of a given list of ASTER images.'''
+    return list(OrderedDict.fromkeys([asterID(file)[:8] for file in astfiles]))
 
 def sort_aster_filelist(filelist):
     '''Sort ASTER files from a list ouput of glob according to their timestamp.'''
@@ -43,19 +46,17 @@ def sort_aster_filelist(filelist):
 
 def is_eurec4a(ai):
     # check instruments are turned on
-    if np.all(myutils.aster.check_instrumentmodes(ai)):
+    if np.all(check_instrumentmodes(ai)):
         # check EUREC4A time
         if (datetime.datetime(2020, 1, 1) < ai.datetime
             < datetime.datetime(2020, 3, 1)):
             # check EUREC4A region
-            if (6 < ai.scenecenter.latitude < 17 and
-                -65 < ai.scenecenter.longitude < -40):
+            if (7 < ai.scenecenter.latitude < 22 and
+                -61 < ai.scenecenter.longitude < -41):
                 ret = True
             else:
                 ret = False
-                print(f"ASTER image location with {ai.scenecenter} lies outside"
-                      f" of the EUREC4A domain (latitude:7 to 17 degree N, "
-                      f"longitude: -60 to -40 degree E)")
+                print(f"ASTER image location {ai.scenecenter} outside.")
         else:
             ret = False
             print(f"ASTER image date {ai.datetime} does not fall into the "
@@ -66,12 +67,20 @@ def is_eurec4a(ai):
     
     return ret
 
-
-
-def dt_unique(astfiles):
-    '''return list of days (format:YYYYMMDD) of a given list of ASTER images.'''
-    return list(OrderedDict.fromkeys([asterID(file)[:8] for file in astfiles]))
-
+def eurec4a_overpasses(files):
+    dt = [dt_from_file(f) for f in files]
+    dt_str = [asterID(f)[:8] for f in files]
+    dt_num = np.array([int(i) for i in dt_str])
+    # create an index array: idx_day
+    dt_uniq_str = dt_unique(files)
+    dt_uniq = [datetime.datetime.strptime(i, "%Y%m%d") for i in dt_uniq_str]
+    # unique days, but at 14 UTC so that it correlates with ASTER overpass in the plot
+    dt_uniq = [i + datetime.timedelta(hours=14) for i in dt_uniq]
+    idx_day = np.full_like(dt, np.nan)
+    for idx, day in enumerate(dt_uniq_str):
+        indices = np.where(dt_num==int(day))[0]
+        idx_day[indices] = idx
+    return dt, idx_day, dt_uniq
 
 def check_VNIRmodeON(file):
     ai = aster.ASTERimage(file)
