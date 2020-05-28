@@ -295,16 +295,19 @@ def load_LUT_Idiff():
     reaching a sensor situated at the surface and looking up (zenith).
     
     Returns:
-        `scipy.interpolate.RectBivariateSpline`: diffuse atmospheric irradiance.
-            irradiance(sun zenith, AOD)
+        `scipy.interpolate.RectBivariateSpline`: callable function that
+            evaluates the spline at a given position (sun zenith [°], AOD) and
+            returns in this sepcific case diffuse atmospheric irradiance.
     '''
     lut = netCDF4.Dataset('/scratch/uni/u237/users/tmieslinger/work/surface_'
                           + 'reflectance/output/LUT_radiance_diffuse_'
                           + 'transmittance.nc', 'r')
-    return RBVS(x=np.cos(np.deg2rad(lut.variables['theta0'][:].astype(float))
+    # construct the splines object such that it hat the dimensions (mu(sun), aod)
+    rbvs = RBVS(x=np.cos(np.deg2rad(lut.variables['theta0'][:].astype(float))
                         )[::-1],
                     y=lut.variables['aod'][:].astype(float),
                     z=lut.variables['radiance'][:].data[::-1])
+    return lambda m, t: rbvs(m, t, grid=False)
 
 
 I_diffuse = load_LUT_Idiff()
@@ -323,7 +326,7 @@ def edown(sun, tau):
     Returns:
         ndarray: diffuse downwelling irradiance.
     '''
-    return np.squeeze(I_diffuse(mu(sun), tau))
+    return I_diffuse(mu(sun), tau) #np.squeeze()?
 
 
 def transmittance_ground(sun, view, ws, tau):
