@@ -3,6 +3,7 @@
 import netCDF4
 import numpy as np
 import scipy
+import xarray as xr
 from scipy.integrate import trapz
 from scipy.interpolate import RectBivariateSpline as RBVS
 from functools import lru_cache
@@ -24,6 +25,14 @@ The main literature for equations and calculation approaches:
 [4] Huaguo Zhang, Kang Yang, Xiulin Lou, Yan Li, Gang Zheng, Juan Wang, Xiaozhen Wang, Lin Ren, Dongling Li, Aiqin Shi, Observation of sea surface roughness at a pixel scale using multi-angle sun glitter images acquired by the ASTER sensor, Remote Sensing of Environment, Volume 208, 2018, Pages 97-108, ISSN 0034-4257, https://doi.org/10.1016/j.rse.2018.02.004.
 '''
 
+def assemble_vector(vx, vy, vz):
+    if isinstance(vx, xr.DataArray):
+        return xr.concat([vx, vy, vz], "v")
+    else:
+        vx, vy, vz = np.broadcast_arrays(vx, vy, vz)
+        return np.stack([vx, vy, vz], axis=0)
+        
+    
 def theta_phi2vector(theta, phi):
     '''Conversion from angles to vector.
     Convert zenith and azimuth angle [rad] to unit vector in (x, y, z)
@@ -39,9 +48,8 @@ def theta_phi2vector(theta, phi):
     vx = np.sin(theta) * np.sin(phi)
     vy = np.sin(theta) * np.cos(phi)
     vz = np.cos(theta)
-    vx, vy, vz = np.broadcast_arrays(vx, vy, vz)
     
-    return np.stack([vx, vy, vz], axis=0)
+    return assemble_vector(vx, vy, vz)
 
 
 def mu_phi2vector(mu, phi):
@@ -61,10 +69,8 @@ def mu_phi2vector(mu, phi):
     vx = st * np.sin(phi)
     vy = st * np.cos(phi)
     vz = mu
-    # match the shapes
-    vx, vy, vz = np.broadcast_arrays(vx, vy, vz)
     
-    return np.stack([vx, vy, vz], axis=0)
+    return assemble_vector(vx, vy, vz)
 
 
 
