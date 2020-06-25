@@ -31,6 +31,20 @@ def assemble_vector(vx, vy, vz):
     else:
         vx, vy, vz = np.broadcast_arrays(vx, vy, vz)
         return np.stack([vx, vy, vz], axis=0)
+    
+def get_component(v, i):
+    if isinstance(v, xr.DataArray):
+        return v.isel(v=i)
+    else:
+        return v[i]
+
+def normalize(v):
+    if isinstance(v, xr.DataArray):
+        return v / xr.apply_ufunc(np.linalg.norm, v,
+                                  input_core_dims=[["v"]], kwargs={"axis": -1})
+    else:
+        # l2 norm, i.e. abs,  along axis 0
+        return v / np.linalg.norm(v, axis=0)
         
     
 def theta_phi2vector(theta, phi):
@@ -85,7 +99,7 @@ def mu(unit_vector):
     Returns:
         ndarray: cosine of theta, i.e. z component of unit vector.
     '''
-    return unit_vector[2]
+    return get_component(unit_vector, 2)
 
 
 def phi(unit_vector):
@@ -98,7 +112,7 @@ def phi(unit_vector):
     Returns:
         ndarray: phi angle in rad.
     '''
-    return np.arctan2(unit_vector[0], unit_vector[1])
+    return np.arctan2(get_component(unit_vector, 0), get_component(unit_vector, 1))
 
 
 def sfc_slope_variance(ws):
@@ -139,7 +153,10 @@ def mu_sca(sun, view):
         ndarray: cosine of scattering angle.
 
     '''
-    return np.einsum('i...,i...->...', sun, view)
+    if isinstance(sun, xr.DataArray):
+        return xr.dot(sun, view, dims=("v",))
+    else:
+        return np.einsum('i...,i...->...', sun, view)
 
 
 def wavefacet_normal(sun, view):
@@ -154,12 +171,8 @@ def wavefacet_normal(sun, view):
         
     Returns:
         float: wave facet normal.
-    '''
-    n = sun + view
-    # l2 norm, i.e. abs,  along axis 0
-    n /= np.linalg.norm(n, axis=0)
-    
-    return n
+    '''    
+    return normalize(sun + view)
 
 
 def gaussian_surface_slope1D(mu_n, sigma2):
@@ -268,6 +281,14 @@ def hbrdf(view, ws, mu_nodes=5, phi_nodes=7):
         55, 1206-1215. (equation 4)
     
     '''
+    if isinstance(view, xr.DataArray):
+        def _hbrdf_last(view, ws):
+            ndims = max(len(view.shape)-1, len(ws.shape))
+            view = view[(np.newaxis,) * (ndims + 1 - len(view.shape)) + (Ellipsis,)]
+            view = np.moveaxis(view, -1, 0)
+            return hbrdf(view, ws, mu_nodes, phi_nodes)
+        return xr.apply_ufunc(_hbrdf_last, view, ws,
+                              input_core_dims=[["v"], []])
     # use Gauss quadratur Legendre integration to get high accuracy in the mu
     # space with few nodes.
     leggauss = lru_cache()(np.polynomial.legendre.leggauss)
@@ -287,12 +308,10 @@ def hbrdf(view, ws, mu_nodes=5, phi_nodes=7):
                   ws
                  )
     # integrate over half-space and the brdf_i at all angles (mu_i, phi_i)
-    hbrdf = trapz(np.einsum('n...,n->...', brdf_i, w),
+    return trapz(np.einsum('n...,n->...', brdf_i, w),
                   x=phi_i,
                   axis=0
                  )
-        
-    return hbrdf
 
 
 def load_LUT_Idiff():
@@ -332,7 +351,10 @@ def edown(sun, tau):
     Returns:
         ndarray: diffuse downwelling irradiance.
     '''
-    return I_diffuse(mu(sun), tau) #np.squeeze()?
+    if isinstance(sun, xr.DataArray):
+        return xr.apply_ufunc(I_diffuse, mu(sun), tau)
+    else:
+        return I_diffuse(mu(sun), tau)
 
 
 def transmittance_ground(sun, view, ws, tau):
