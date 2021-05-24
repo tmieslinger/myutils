@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 import datetime
+import glob
 import time
 
 import numpy as np
@@ -30,6 +31,12 @@ def dt_from_file(file):
     dt = str(x[7:11])+str(x[3:7])+str(x[11:19])
     
     return datetime.datetime.strptime(dt, "%Y%m%d%H%M%S")
+
+def convert_npdt2asterfilename(dt):
+    prefix = "/scratch/uni/u237/data/aster/aster_L1B/eurec4a/AST_L1B_003"
+    date = datetime.datetime.strftime(datetime.datetime.utcfromtimestamp(dt.astype('O')/1e9),
+                                      "%m%d%Y%H%M%S")
+    return glob.glob(prefix+date+"*.hdf")[0]
 
 def dt_unique(astfiles):
     '''return list of days (format:YYYYMMDD) of a given list of ASTER images.'''
