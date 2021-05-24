@@ -87,7 +87,7 @@ def convert_lons(longitudes):
     return (longitudes + 180) % 360 - 180
 
 ### wind speed distribution
-def get_era5uv_2aster(file):
+def get_era5uv_2aster(file, average=True):
     '''Check for file existance and download ERA5 if necessary, read wind speed data, calculate average of pixel corresponding to ASTER image.
         
     Parameters:
@@ -111,10 +111,12 @@ def get_era5uv_2aster(file):
         
     u = read_era5_variable(erafile, 'u10')[mask]
     v = read_era5_variable(erafile, 'v10')[mask]
-    
-    return (np.mean(u), np.mean(v))
+    if average:
+        return (np.mean(u), np.mean(v))
+    else:
+        return (u, v)
 
-def get_era5uv_2aster_grid(file):
+def get_era5uv_2aster_grid(file, era5type="surface"):
     '''Check for file existance and download ERA5 if necessary, read wind speed data,
     interpolate with nearest neighbor to ASTER image dimension.
         
@@ -122,34 +124,47 @@ def get_era5uv_2aster_grid(file):
         file (str): ASTER granule filename including path.
         
     Returns:
-        float: average wind speed [ms-1]
+        ndarray: U wind component in m/s
+        ndarray: V wind component in m/s
     '''
     ai = aster.ASTERimage(file)
     lats_ast, lons_ast = ai.get_latlon_grid()
-    LL, LR, UL, UR = get_aster_cornercoordinates(file)
-    
-    era5path = '/scratch/uni/u237/user_data/tmieslinger/era5/'
-    erafile = get_era5_file(path=era5path, dt=ai.datetime)
 
-    lon = read_era5_variable(erafile, 'longitude')
-    lat = read_era5_variable(erafile, 'latitude')
-    lons, lats = np.meshgrid(lon, lat)
-    
-    # the mask includes the ASTER domain extendet by 1 degree to all sides
-    mask = np.logical_and(lons > LL[1] - 1,
-                          np.logical_and(lons < UR[1] + 1,
-                                         np.logical_and(lats > LR[0] - 1,
-                                                        lats < UL[0] + 1)))
-        
-    u_era = read_era5_variable(erafile, 'u10')[mask]
-    v_era = read_era5_variable(erafile, 'v10')[mask]
-    lons_era = lons[mask]
-    lats_era = lats[mask]
-    
-    # interpolate era5 data to ASTER grid
-    u = griddata((lats_era, lons_era), u_era, (lats_ast, lons_ast), method='linear')
-    v = griddata((lats_era, lons_era), v_era, (lats_ast, lons_ast), method='linear')
-    
+    if era5type=="surface":
+        era5path = '/scratch/uni/u237/user_data/tmieslinger/era5/'
+        erafile = get_era5_file(path=era5path, dt=ai.datetime)
+
+        lon = read_era5_variable(erafile, 'longitude')
+        lat = read_era5_variable(erafile, 'latitude')
+
+        lons, lats = np.meshgrid(lon, lat)
+
+        # the mask includes the ASTER domain extendet by 1 degree to all sides
+        LL, LR, UL, UR = get_aster_cornercoordinates(file)
+        mask = np.logical_and(lons > LL[1] - 1,
+                              np.logical_and(lons < UR[1] + 1,
+                                             np.logical_and(lats > LR[0] - 1,
+                                                            lats < UL[0] + 1)))
+
+        u_era = read_era5_variable(erafile, 'u10')[mask]
+        v_era = read_era5_variable(erafile, 'v10')[mask]
+        lons_era = lons[mask]
+        lats_era = lats[mask]
+        # interpolate era5 data to ASTER grid
+        u = griddata((lats_era, lons_era), u_era, (lats_ast, lons_ast), method='linear')
+        v = griddata((lats_era, lons_era), v_era, (lats_ast, lons_ast), method='linear')
+
+    elif era5type=="profile":
+        era5_file = '/scratch/uni/u237/user_data/tmieslinger/era5/era5_uvprofiles_eurec4a.nc'
+        era5 = xr.open_dataset(era5_file)
+        era5_aster = era5.sel(time=ai.datetime,
+                              level=1000,
+                              method="nearest") \
+                         .interp(latitude=xr.DataArray(lats_ast, dims=("y", "x")),
+                                 longitude=xr.DataArray(convert_lons(lons_ast), dims=("y", "x")),
+                                 method="linear")
+        u = era5_aster.u.values
+        v = era5_aster.v.values
     return u, v
 
 def get_aster_cornercoordinates(file):
