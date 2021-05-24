@@ -82,6 +82,9 @@ def convert_phi_2uvspecformat(phi):
     """
     return (phi + 180) % 360
 
+def convert_lons(longitudes):
+    '''Convert longitude ranging from 0 to 360 to a scale from -180 tp 180 degree'''
+    return (longitudes + 180) % 360 - 180
 
 ### wind speed distribution
 def get_era5uv_2aster(file):
@@ -180,8 +183,7 @@ def read_era5_variable(file, var):
         pass
     elif var=='longitude':
         # longitudes are defined from 0to360°E. Change to -180 to 180 °E.
-        ret = data.variables['longitude'][:]
-        ret = -(360 - ret)
+        ret = convert_lons(data.variables['longitude'][:])
     else:
         ret = data.variables[var][:]
 
