@@ -396,12 +396,16 @@ def aster_raw2nc(file, path2ofile="output/nc"):
 def construct_binedges(reflectances):
     '''Get linearly spaced bins corresponding to discrete ASTER reflectance values.'''
     dr = np.unique(reflectances)[1] - np.unique(reflectances)[0]
-    
     return np.arange(dr/2, np.nanmax(reflectances), dr)
-
 
 def edges2mids(binedges):
     return binedges[:-1] + (binedges[1] - binedges[0])/2
+
+def mids2edges(binmids):
+    x = np.mean(np.array([binmids[:-1], binmids[1:]]), axis=0)
+    x0 = np.array([binmids[0] - (x[0] - binmids[0])])
+    x1 = np.array([binmids[-1] + (binmids[-1] - x[-1])])
+    return np.append(np.append(x0, x), x1)
 
 
 def get_hist_aster(hdffile):
