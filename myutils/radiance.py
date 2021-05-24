@@ -25,6 +25,9 @@ The main literature for equations and calculation approaches:
 [4] Huaguo Zhang, Kang Yang, Xiulin Lou, Yan Li, Gang Zheng, Juan Wang, Xiaozhen Wang, Lin Ren, Dongling Li, Aiqin Shi, Observation of sea surface roughness at a pixel scale using multi-angle sun glitter images acquired by the ASTER sensor, Remote Sensing of Environment, Volume 208, 2018, Pages 97-108, ISSN 0034-4257, https://doi.org/10.1016/j.rse.2018.02.004.
 '''
 
+G = 0 # 0 isotrope scattering
+OMEGA0 = .9 #.9 almost white
+
 def assemble_vector(vx, vy, vz):
     if isinstance(vx, xr.DataArray):
         return xr.concat([vx, vy, vz], "v")
@@ -381,7 +384,7 @@ def transmittance_ground(sun, view, ws, tau):
     return (direct + diffuse) * np.exp(-tau / mu(view))
 
 
-def phaseHenyeyGreenstein(sun, view, g=0):
+def phaseHenyeyGreenstein(sun, view, g=G):
     '''Henyey Greenstein phase function.
     
     Parameters:
@@ -403,7 +406,7 @@ def phaseHenyeyGreenstein(sun, view, g=0):
                                            * mu_sca(sun, view))**1.5)
     
 
-def transmittance_atm(sun, view, tau, omega0=.9):
+def transmittance_atm(sun, view, tau, omega0=OMEGA0, g=G):
     '''Diffuse atmospheric radiance.
     Radiance reaching a sensor with a single (aerosol) scattering event and no
     contact to the ground. Derivation is similar to the "direct" radiance, but
@@ -427,7 +430,7 @@ def transmittance_atm(sun, view, tau, omega0=.9):
         Koelling, T., 2015. Characterization, calibration and operation of a
         hyperspectral sky imager. Master’s thesis.
     '''
-    pHG = phaseHenyeyGreenstein(sun, view)
+    pHG = phaseHenyeyGreenstein(sun, view, g)
     
     return (pHG * omega0 * mu(sun)
             * (1 - np.exp(-tau / mu(sun) - tau / mu(view)))
@@ -481,7 +484,7 @@ def reflectance(sun, view, ws, tau):
     return np.pi / mu(sun) * transmittance(sun, view, ws, tau)
 
 
-def reflectance_atm(sun, view, tau, omega0=.9):
+def reflectance_atm(sun, view, tau, omega0=OMEGA0, g=G):
     '''Reflectance from diffuse atmospheric sun light.
     
     See also:
@@ -498,7 +501,7 @@ def reflectance_atm(sun, view, tau, omega0=.9):
     Returns:
         (ndarray): diffuse atmospheric reflectance.
     '''
-    return np.pi / mu(sun) * transmittance_atm(sun, view, tau, omega0)
+    return np.pi / mu(sun) * transmittance_atm(sun, view, tau, omega0, g)
 
 
 class Wind():
