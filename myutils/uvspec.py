@@ -9,7 +9,7 @@ from datetime import timedelta
 import numpy as np
 import xarray as xr
 import netCDF4
-import cdsapi
+
 from scipy.interpolate import griddata
 
 import typhon as ty
@@ -221,6 +221,7 @@ def check_era5file_existance(path, dt):
 
 def download_era5(dt, path_destination):
     '''Download ERA5 file from ECMWF CDS (last checked:2019-11-14)'''
+    import cdsapi
     c = cdsapi.Client()
     c.retrieve(
         'reanalysis-era5-single-levels',
